@@ -66,8 +66,9 @@ for i = 1:numFiles
         matrixRect.set('size', [Lx, Ly]);
         
         % Create ellipse objects for inclusions
-        ellipses_geom = {};
-        for j = 1:length(data.ellipses)
+        numEllipses = length(data.ellipses);
+        ellipses_geom = cell(1, numEllipses);
+        for j = 1:numEllipses
             ell = data.ellipses(j);
             ellTagName = ['ell' num2str(j)];
             ellipses_geom{j} = geom.create(ellTagName, 'Ellipse');
