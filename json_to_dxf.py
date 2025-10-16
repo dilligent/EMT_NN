@@ -44,13 +44,25 @@ def convert_json_to_dxf(json_path: Path, dxf_path: Path):
         b = ell_param['b']
         theta_deg = ell_param['theta_deg']
         
+        # 确保主轴是较长的那个轴
+        if a >= b:
+            major_axis_length = a
+            minor_axis_length = b
+            angle = theta_deg
+        else:
+            # 如果b>a，交换并旋转90度
+            major_axis_length = b
+            minor_axis_length = a
+            angle = theta_deg + 90
+        
         # ezdxf.add_ellipse 需要中心点、主轴矢量和短轴/长轴比
         center = (x, y)
-        ratio = b / a # ezdxf 使用的是短轴与长轴的比例
+        ratio = minor_axis_length / major_axis_length  # 必须 <= 1.0
         
-        # 计算主轴矢量 (一个从中心点指向椭圆长轴顶点的矢量)
-        theta_rad = math.radians(theta_deg)
-        major_axis_vector = (a * math.cos(theta_rad), a * math.sin(theta_rad))
+        # 计算主轴矢量
+        theta_rad = math.radians(angle)
+        major_axis_vector = (major_axis_length * math.cos(theta_rad), 
+                            major_axis_length * math.sin(theta_rad))
         
         msp.add_ellipse(
             center=center,
