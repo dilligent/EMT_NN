@@ -1,0 +1,27 @@
+{
+  "json_dir": "./generated_samples_bat/json_files",
+  "csv_file": "./effective_conductivity_results.csv",
+  "batch_size": 16,
+  "train_ratio": 0.7,
+  "val_ratio": 0.15,
+  "test_ratio": 0.15,
+  "num_workers": 0,
+  "random_seed": 42,
+  
+  "model_type": "basic",
+  "encoder_hidden_dims": [64, 128, 256],
+  "decoder_hidden_dims": [256, 128, 64],
+  "aggregation": "mean_max",
+  "include_global_features": true,
+  
+  "num_epochs": 200,
+  "learning_rate": 0.001,
+  "weight_decay": 1e-5,
+  "mse_weight": 1.0,
+  "symmetry_weight": 0.1,
+  "positive_weight": 0.0,
+  "early_stopping_patience": 30,
+  "save_interval": 20,
+  
+  "output_dir": "./outputs/deep_sets_basic"
+}
