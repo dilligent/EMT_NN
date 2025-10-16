@@ -100,7 +100,7 @@ for ($i = 1; $i -le $numberOfSamples; $i++) {
         "--summary_csv", $summaryCsvPath,
         "--seed", $seed,
         "--Lx", $Lx,
-        "--Ly", '1.0', # Ly.ToString()
+        "--Ly", $Ly, # 使用配置的 $Ly 变量
         "--km", $km,
         "--ki", $ki,
         "--N", $N,
@@ -127,9 +127,9 @@ for ($i = 1; $i -le $numberOfSamples; $i++) {
     # -ArgumentList 需要一个数组
     Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] 启动任务 $i / $numberOfSamples (Seed: $seed)"
     Start-Job -ScriptBlock {
-        param($pyScript, $args)
+        param($pyScript, $pyArgs)
         # 在作业中执行 python 命令
-        python $pyScript @args
+        python $pyScript @pyArgs
     } -ArgumentList @($pythonScriptPath, $arguments) | Out-Null # Out-Null 隐藏作业对象的输出
 }
 
