@@ -1,0 +1,21 @@
+# filepath: sets-transformer-thermal-conductivity/configs/training.yaml
+train:
+  batch_size: 16
+  epochs: 200
+  learning_rate: 0.001
+  patience: 15
+  device: cuda
+
+data:
+  json_dir: './data/json_files'
+  csv_file: './data/effective_conductivity_results.csv'
+
+model:
+  hidden_dim: 128
+  output_dim: 128
+  num_heads: 4
+  dropout_rate: 0.2
+
+logging:
+  log_interval: 10
+  save_model_path: './models/best_sets_transformer_model.pt'

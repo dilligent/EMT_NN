@@ -163,7 +163,7 @@ for i = 1:numFiles
         
         % --- 7. Meshing ---
         mesh = model.component('comp1').mesh.create('mesh1');
-        mesh.autoMeshSize(5); % 5 = finer mesh, adjust as needed
+        mesh.autoMeshSize(4); % 4 = finer mesh, adjust as needed
         mesh.run();
         
         fprintf('  ✓ Mesh created\n');
