@@ -46,99 +46,119 @@ for i = 1:numFiles
     modelTag = sprintf('Model_%d', i);
     model = ModelUtil.create(modelTag);
     model.component.create('comp1', true);
-    
+
     jsonPath = fullfile(jsonFiles(i).folder, jsonFiles(i).name);
     fprintf('[%d/%d] Processing: %s\n', i, numFiles, jsonFiles(i).name);
-    
+
+    % 初始化，避免在解析前出错导致二次异常
+    sample_id = string(jsonFiles(i).name);
+    phi_actual = NaN;
+
     try
         % --- 1. Load and Parse JSON ---
         jsonText = fileread(jsonPath);
         data = jsondecode(jsonText);
-        
+
         % Extract metadata
         meta = data.meta;
         Lx = meta.Lx;
         Ly = meta.Ly;
         km = meta.km;
         ki = meta.ki;
-        
+
         sample_id = string(meta.sample_id);
         phi_actual = meta.phi;
-        
-        
-        % --- 2. Build Geometry in COMSOL ---
+
+        % --- 2. Build Geometry in COMSOL (保留夹杂域) ---
         geom = model.component('comp1').geom.create('geom1', 2);
-        
-        % Create the main rectangle (matrix)
-        matrixRect = geom.create('r1', 'Rectangle');
-        matrixRect.set('size', [Lx, Ly]);
-        
-        % Create ellipse objects for inclusions
+
+        % 矩形基体
+        r1 = geom.create('r1', 'Rectangle');
+        r1.set('size', [Lx, Ly]);
+
+        % 椭圆集合
         numEllipses = length(data.ellipses);
         ellipse_tags = cell(1, numEllipses);
-        
         for j = 1:numEllipses
             ell = data.ellipses(j);
             tag = sprintf('el%d', j);
             ellipse_tags{j} = tag;
-            
             elGeom = geom.create(tag, 'Ellipse');
             elGeom.set('pos', [ell.x, ell.y]);
             elGeom.set('semiaxes', [ell.a, ell.b]);
             elGeom.set('rot', ell.theta_deg);
         end
-        
-        % Form the composite by subtracting ellipses from the rectangle
-        diffOp = geom.create('dif1', 'Difference');
-        diffOp.selection('input').set('r1'); % Object to add
-        diffOp.selection('input2').set(ellipse_tags); % Objects to subtract
-        
+        % 椭圆并集
+        uniE = geom.create('uniE', 'Union');
+        uniE.selection('input').set(ellipse_tags);
+        uniE.set('keep', true);
+
+        % 基体域 = 矩形减椭圆
+        dif1 = geom.create('dif1', 'Difference');
+        dif1.selection('input').set('r1');
+        dif1.selection('input2').set('uniE');
+        dif1.set('keep', true);             % 保留选择
+        dif1.set('createselection', 'on');  % 生成命名 selection
+
+        % 夹杂域 = 矩形与椭圆交
+        int1 = geom.create('int1', 'Intersection');
+        int1.selection('input').set({'r1', 'uniE'});
+        int1.set('keep', true);
+        int1.set('createselection', 'on');
+
+        % 最终成形（保留内边界，使其成为不同域）
+        fin1 = geom.create('fin1', 'Union');
+        fin1.selection('input').set({'dif1', 'int1'});
+        fin1.set('intbnd', true); % keep interior boundaries
+
         geom.run;
-        
+
         fprintf('  ✓ Geometry created: %d ellipses\n', numEllipses);
-        
-        % --- 3. Define Global Parameters FIRST ---
-        model.param.set('Lx', Lx, 'm');
-        model.param.set('Ly', Ly, 'm');
-        model.param.set('km', km, 'W/(m*K)');
-        model.param.set('ki', ki, 'W/(m*K)');
-        model.param.set('T_hot', T_hot, 'K');
-        model.param.set('T_cold', T_cold, 'K');
-        
-        % --- 4. Create Selections for Boundaries ---
+
+        % --- 3. Define Global Parameters (带单位表达式更稳妥) ---
+        model.param.set('Lx', sprintf('%g[m]', Lx));
+        model.param.set('Ly', sprintf('%g[m]', Ly));
+        model.param.set('km', sprintf('%g[W/(m*K)]', km));
+        model.param.set('ki', sprintf('%g[W/(m*K)]', ki));
+        model.param.set('T_hot', sprintf('%g[K]', T_hot));
+        model.param.set('T_cold', sprintf('%g[K]', T_cold));
+
+        % --- 4. Boundary Selections（补全 y 范围） ---
         sel_b_left = geom.create('sel_b_left', 'BoxSelection');
-        sel_b_left.set('xmin', -0.1*Lx); sel_b_left.set('xmax', 0);
         sel_b_left.set('entitydim', 1);
-        
+        sel_b_left.set('xmin', -0.1*Lx); sel_b_left.set('xmax', 0);
+        sel_b_left.set('ymin', 0);       sel_b_left.set('ymax', Ly);
+
         sel_b_right = geom.create('sel_b_right', 'BoxSelection');
-        sel_b_right.set('xmin', Lx); sel_b_right.set('xmax', 1.1*Lx);
         sel_b_right.set('entitydim', 1);
-        
+        sel_b_right.set('xmin', Lx);     sel_b_right.set('xmax', 1.1*Lx);
+        sel_b_right.set('ymin', 0);      sel_b_right.set('ymax', Ly);
+
         sel_b_bottom = geom.create('sel_b_bottom', 'BoxSelection');
-        sel_b_bottom.set('ymin', -0.1*Ly); sel_b_bottom.set('ymax', 0);
         sel_b_bottom.set('entitydim', 1);
-        
+        sel_b_bottom.set('xmin', 0);     sel_b_bottom.set('xmax', Lx);
+        sel_b_bottom.set('ymin', -0.1*Ly); sel_b_bottom.set('ymax', 0);
+
         sel_b_top = geom.create('sel_b_top', 'BoxSelection');
-        sel_b_top.set('ymin', Ly); sel_b_top.set('ymax', 1.1*Ly);
         sel_b_top.set('entitydim', 1);
-        
+        sel_b_top.set('xmin', 0);        sel_b_top.set('xmax', Lx);
+        sel_b_top.set('ymin', Ly);       sel_b_top.set('ymax', 1.1*Ly);
+
         geom.run;
-        
-        % --- 5. Define Materials ---
+
+        % --- 5. Materials（用几何特征 selection 绑定域） ---
         mat_matrix = model.component('comp1').material.create('mat1', 'Common');
         mat_matrix.label('Matrix');
         mat_matrix.propertyGroup('def').set('thermalconductivity', {'km'});
-        mat_matrix.selection.set(1);
-        
+        % 绑定 dif1 的域
+        mat_matrix.selection.named('geom1_dif1_dom');
+
         mat_inclusion = model.component('comp1').material.create('mat2', 'Common');
         mat_inclusion.label('Inclusion');
         mat_inclusion.propertyGroup('def').set('thermalconductivity', {'ki'});
-        
-        nDomains = model.geom('geom1').getNDomains();
-        if nDomains > 1
-            mat_inclusion.selection.set(2:nDomains);
-        end
-        
+        % 绑定 int1 的域
+        mat_inclusion.selection.named('geom1_int1_dom');
+
         % --- 6. Add Physics (Heat Transfer) ---
         phys = model.component('comp1').physics.create('ht', 'HeatTransfer', 'geom1');
         
