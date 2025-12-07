@@ -110,10 +110,32 @@ class DeepSetsAggregator(nn.Module):
             nn.Linear(hidden_dim, output_dim)
         )
     
-    def forward(self, encoded_features):
+    def forward(self, encoded_features, mask=None):
         # encoded_features: (batch_size, num_ellipses, encoded_dim)
-        mean_pooled = torch.mean(encoded_features, dim=1)
-        max_pooled, _ = torch.max(encoded_features, dim=1)
+        
+        if mask is not None:
+            # mask: (batch_size, num_ellipses)
+            mask = mask.to(encoded_features.device)
+            mask_expanded = mask.unsqueeze(-1).float()
+            
+            # Masked Mean
+            # 1. Zero out padded positions
+            masked_features = encoded_features * mask_expanded
+            # 2. Sum valid features
+            sum_features = torch.sum(masked_features, dim=1)
+            # 3. Count valid items
+            count = torch.sum(mask_expanded, dim=1)
+            count = torch.clamp(count, min=1.0) # Avoid div by zero
+            mean_pooled = sum_features / count
+            
+            # Masked Max
+            # Replace padding with very small number so they don't affect max
+            features_for_max = encoded_features.clone()
+            features_for_max[~mask] = -1e9
+            max_pooled, _ = torch.max(features_for_max, dim=1)
+        else:
+            mean_pooled = torch.mean(encoded_features, dim=1)
+            max_pooled, _ = torch.max(encoded_features, dim=1)
         
         aggregated = torch.cat([mean_pooled, max_pooled], dim=1)
         return self.mlp(aggregated)
@@ -153,11 +175,12 @@ class EllipseToThermalDeepSets(nn.Module):
             nn.Linear(128, 4)  # k_xx, k_xy, k_yx, k_yy
         )
     
-    def forward(self, ellipse_features, phi):
+    def forward(self, ellipse_features, phi, mask=None):
         """
         Args:
             ellipse_features: (batch_size, num_ellipses, 6)
             phi: (batch_size,)
+            mask: (batch_size, num_ellipses) - Optional
         
         Returns:
             conductivity: (batch_size, 4)
@@ -169,7 +192,7 @@ class EllipseToThermalDeepSets(nn.Module):
         encoded = encoded.reshape(batch_size, num_ellipses, -1)
         
         # 聚合
-        aggregated = self.aggregator(encoded)
+        aggregated = self.aggregator(encoded, mask)
         
         # 解码
         phi_expanded = phi.unsqueeze(1)
@@ -183,7 +206,7 @@ class EllipseToThermalDeepSets(nn.Module):
 class EarlyStopping:
     """早停机制"""
     
-    def __init__(self, patience=15, min_delta=1e-4, path='best_model.pt'):
+    def __init__(self, patience=50, min_delta=1e-4, path='best_model.pt'):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -205,6 +228,32 @@ class EarlyStopping:
         return self.counter >= self.patience
 
 
+def collate_fn(batch):
+    """自定义collate函数，处理变长序列"""
+    sample_ids = [item['sample_id'] for item in batch]
+    conductivity = torch.stack([item['conductivity'] for item in batch])
+    phi = torch.stack([item['phi'] for item in batch])
+    
+    # 处理变长的 ellipse_features
+    features_list = [item['ellipse_features'] for item in batch]
+    
+    # 填充序列 (batch, max_len, feat)
+    padded_features = torch.nn.utils.rnn.pad_sequence(features_list, batch_first=True, padding_value=0.0)
+    
+    # 创建掩码 (batch, max_len) - 真实数据为True，填充为False
+    lengths = torch.tensor([len(f) for f in features_list])
+    max_len = padded_features.shape[1]
+    mask = torch.arange(max_len)[None, :] < lengths[:, None]
+    
+    return {
+        'sample_id': sample_ids,
+        'ellipse_features': padded_features,
+        'conductivity': conductivity,
+        'phi': phi,
+        'mask': mask
+    }
+
+
 def train_epoch(model, train_loader, criterion, optimizer, device):
     """训练一个epoch"""
     model.train()
@@ -214,6 +263,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         ellipse_features = batch['ellipse_features'].to(device)
         conductivity = batch['conductivity'].to(device)
         phi = batch['phi'].to(device)
+        mask = batch['mask'].to(device)
         
         # 将conductivity矩阵展平为向量 (batch_size, 4)
         batch_size = conductivity.shape[0]
@@ -221,7 +271,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         
         # 前向传播
         optimizer.zero_grad()
-        predictions = model(ellipse_features, phi)
+        predictions = model(ellipse_features, phi, mask)
         
         # 计算损失
         loss = criterion(predictions, conductivity_vec)
@@ -246,11 +296,12 @@ def validate(model, val_loader, criterion, device):
             ellipse_features = batch['ellipse_features'].to(device)
             conductivity = batch['conductivity'].to(device)
             phi = batch['phi'].to(device)
+            mask = batch['mask'].to(device)
             
             batch_size = conductivity.shape[0]
             conductivity_vec = conductivity.reshape(batch_size, 4)
             
-            predictions = model(ellipse_features, phi)
+            predictions = model(ellipse_features, phi, mask)
             loss = criterion(predictions, conductivity_vec)
             
             total_loss += loss.item()
@@ -259,13 +310,15 @@ def validate(model, val_loader, criterion, device):
 
 
 def train_model(model, train_loader, val_loader, epochs=200, learning_rate=1e-3, 
-                device='cuda', patience=15):
+                device='cuda', patience=50):
     """完整的训练循环，包含早停机制"""
     
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+    
+    # 修复：删除了 verbose=True 参数，因为它在较新版本的 PyTorch 中会导致 TypeError
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+        optimizer, mode='min', factor=0.5, patience=50
     )
     
     early_stopping = EarlyStopping(patience=patience, path='best_deepsets_model.pt')
@@ -285,7 +338,13 @@ def train_model(model, train_loader, val_loader, epochs=200, learning_rate=1e-3,
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         
+        # 手动检查并打印学习率变化（替代 verbose=True 的功能）
+        last_lr = optimizer.param_groups[0]['lr']
         scheduler.step(val_loss)
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        if current_lr != last_lr:
+            print(f"Epoch {epoch+1}: 学习率已调整为 {current_lr:.6f}")
         
         if (epoch + 1) % 10 == 0 or epoch == 0:
             print(f"Epoch {epoch+1:3d}/{epochs} | "
@@ -312,12 +371,12 @@ def main():
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"使用设备: {DEVICE}")
     
-    JSON_DIR = './json_files'  # 修改为实际的JSON文件目录
-    CSV_FILE = './effective_conductivity_results.csv'
-    BATCH_SIZE = 16
-    EPOCHS = 200
+    JSON_DIR = './generated_samples_bat/json_files'  # 修改为实际的JSON文件目录
+    CSV_FILE = './effective_conductivity_results.csv'  # 修改为实际的CSV文件路径
+    BATCH_SIZE = 32
+    EPOCHS = 500
     LEARNING_RATE = 1e-3
-    PATIENCE = 15
+    PATIENCE = 100
     
     # 创建数据集
     print("加载数据...")
@@ -336,12 +395,14 @@ def main():
         train_dataset, 
         batch_size=BATCH_SIZE, 
         shuffle=True,
-        drop_last=True
+        drop_last=True,
+        collate_fn=collate_fn  # 添加自定义collate_fn
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=BATCH_SIZE, 
-        shuffle=False
+        shuffle=False,
+        collate_fn=collate_fn  # 添加自定义collate_fn
     )
     
     # 创建模型
@@ -383,11 +444,12 @@ def main():
         ellipse_features = test_batch['ellipse_features'].to(DEVICE)
         conductivity_true = test_batch['conductivity'].to(DEVICE)
         phi = test_batch['phi'].to(DEVICE)
+        mask = test_batch['mask'].to(DEVICE)
         
         batch_size = conductivity_true.shape[0]
         conductivity_vec_true = conductivity_true.reshape(batch_size, 4)
         
-        predictions = model(ellipse_features, phi)
+        predictions = model(ellipse_features, phi, mask)
         
         # 计算平均绝对误差 (MAE)
         mae = torch.mean(torch.abs(predictions - conductivity_vec_true)).item()

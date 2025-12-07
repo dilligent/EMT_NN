@@ -24,8 +24,8 @@ except Exception as e:
 # 测试数据加载
 print("\n2. Testing data loader...")
 try:
-    json_dir = "./generated_samples_bat/json_files"
-    csv_file = "./effective_conductivity_results.csv"
+    json_dir = "../generated_samples_bat/json_files"
+    csv_file = "../effective_conductivity_results.csv"
     
     if not Path(json_dir).exists():
         print(f"✗ Directory not found: {json_dir}")
@@ -95,8 +95,9 @@ try:
     print(f"  Total parameters: {num_params:,}")
     
     # 前向传播测试
-    ellipse_features = batch['ellipse_features'].to(device)
-    global_features = batch['global_features'].to(device)
+    # Fix: Explicitly cast to float32 to avoid Double vs Float errors
+    ellipse_features = batch['ellipse_features'].to(device).float()
+    global_features = batch['global_features'].to(device).float()
     
     with torch.no_grad():
         output = model(ellipse_features, global_features)
@@ -146,7 +147,8 @@ try:
     from train import MaskedDeepSetsModel
     
     masked_model = MaskedDeepSetsModel(model).to(device)
-    mask = batch['mask'].to(device)
+    # Fix: Explicitly cast mask to float32
+    mask = batch['mask'].to(device).float()
     
     with torch.no_grad():
         output_masked = masked_model(ellipse_features, global_features, mask)
@@ -166,7 +168,8 @@ try:
     from train import ConductivityLoss
     
     criterion = ConductivityLoss(mse_weight=1.0, symmetry_weight=0.1, positive_weight=0.0)
-    k_matrix = batch['k_matrix'].to(device)
+    # Fix: Explicitly cast target to float32
+    k_matrix = batch['k_matrix'].to(device).float()
     
     loss, loss_dict = criterion(output_masked, k_matrix)
     
