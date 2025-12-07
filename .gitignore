@@ -1,2 +1,3 @@
 *.mph
 *.lock
+*.pyc
