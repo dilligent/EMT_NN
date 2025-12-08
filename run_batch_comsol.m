@@ -123,26 +123,38 @@ for i = 1:numFiles
         model.param.set('T_hot', sprintf('%g[K]', T_hot));
         model.param.set('T_cold', sprintf('%g[K]', T_cold));
 
-        % --- 4. Boundary Selections（补全 y 范围） ---
+        % --- 4. Boundary Selections（修正：使用 inside 避免选中垂直边界） ---
+        % 关键修改：
+        % 1. 使用 'inside' 条件，确保只有完全在框内的边界被选中。
+        % 2. 扩大框的范围以完全包裹目标边界（例如左边界框跨越 x=0）。
+        
+        % Left Boundary (x=0)
         sel_b_left = geom.create('sel_b_left', 'BoxSelection');
         sel_b_left.set('entitydim', 1);
-        sel_b_left.set('xmin', -0.1*Lx); sel_b_left.set('xmax', 0);
-        sel_b_left.set('ymin', 0);       sel_b_left.set('ymax', Ly);
+        sel_b_left.set('condition', 'inside'); % 仅选中完全在内部的实体
+        sel_b_left.set('xmin', -0.1*Lx); sel_b_left.set('xmax', 0.1*Lx); % 跨越 x=0
+        sel_b_left.set('ymin', -0.1*Ly); sel_b_left.set('ymax', 1.1*Ly); % 覆盖整个 y 高度
 
+        % Right Boundary (x=Lx)
         sel_b_right = geom.create('sel_b_right', 'BoxSelection');
         sel_b_right.set('entitydim', 1);
-        sel_b_right.set('xmin', Lx);     sel_b_right.set('xmax', 1.1*Lx);
-        sel_b_right.set('ymin', 0);      sel_b_right.set('ymax', Ly);
+        sel_b_right.set('condition', 'inside');
+        sel_b_right.set('xmin', 0.9*Lx); sel_b_right.set('xmax', 1.1*Lx);
+        sel_b_right.set('ymin', -0.1*Ly); sel_b_right.set('ymax', 1.1*Ly);
 
+        % Bottom Boundary (y=0)
         sel_b_bottom = geom.create('sel_b_bottom', 'BoxSelection');
         sel_b_bottom.set('entitydim', 1);
-        sel_b_bottom.set('xmin', 0);     sel_b_bottom.set('xmax', Lx);
-        sel_b_bottom.set('ymin', -0.1*Ly); sel_b_bottom.set('ymax', 0);
+        sel_b_bottom.set('condition', 'inside');
+        sel_b_bottom.set('xmin', -0.1*Lx); sel_b_bottom.set('xmax', 1.1*Lx);
+        sel_b_bottom.set('ymin', -0.1*Ly); sel_b_bottom.set('ymax', 0.1*Ly);
 
+        % Top Boundary (y=Ly)
         sel_b_top = geom.create('sel_b_top', 'BoxSelection');
         sel_b_top.set('entitydim', 1);
-        sel_b_top.set('xmin', 0);        sel_b_top.set('xmax', Lx);
-        sel_b_top.set('ymin', Ly);       sel_b_top.set('ymax', 1.1*Ly);
+        sel_b_top.set('condition', 'inside');
+        sel_b_top.set('xmin', -0.1*Lx); sel_b_top.set('xmax', 1.1*Lx);
+        sel_b_top.set('ymin', 0.9*Ly); sel_b_top.set('ymax', 1.1*Ly);
 
         geom.run;
 

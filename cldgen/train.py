@@ -97,10 +97,10 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     
     pbar = tqdm(dataloader, desc="Training")
     for batch in pbar:
-        ellipse_features = batch['ellipse_features'].to(device)
-        global_features = batch['global_features'].to(device)
-        mask = batch['mask'].to(device)
-        k_matrix = batch['k_matrix'].to(device)
+        ellipse_features = batch['ellipse_features'].to(device).float()
+        global_features = batch['global_features'].to(device).float()
+        mask = batch['mask'].to(device).float()
+        k_matrix = batch['k_matrix'].to(device).float()
         
         # 前向传播
         optimizer.zero_grad()
@@ -142,10 +142,10 @@ def validate(model, dataloader, criterion, device, dataset=None):
     
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Validating"):
-            ellipse_features = batch['ellipse_features'].to(device)
-            global_features = batch['global_features'].to(device)
-            mask = batch['mask'].to(device)
-            k_matrix = batch['k_matrix'].to(device)
+            ellipse_features = batch['ellipse_features'].to(device).float()
+            global_features = batch['global_features'].to(device).float()
+            mask = batch['mask'].to(device).float()
+            k_matrix = batch['k_matrix'].to(device).float()
             
             # 前向传播
             pred = model(ellipse_features, global_features, mask)
@@ -276,7 +276,7 @@ def train_model(config):
     
     # 学习率调度器
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=10, verbose=True
+        optimizer, mode='min', factor=0.5, patience=10
     )
     
     # TensorBoard
@@ -354,7 +354,7 @@ def train_model(config):
     print("Evaluating best model on test set...")
     
     # 加载最佳模型
-    checkpoint = torch.load(checkpoint_dir / 'best_model.pt')
+    checkpoint = torch.load(checkpoint_dir / 'best_model.pt', weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     test_loss, test_mse, test_symmetry, test_rmse, test_r2, test_preds, test_targets = validate(
